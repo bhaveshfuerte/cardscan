@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BizCard Snap - Business Card Scanner & Excel Exporter</title>
+  <!-- SEO & Meta Tags -->
+  <meta name="description" content="Scan business cards using your camera or file uploads, automatically extract details using local OCR or Gemini AI, and export them directly to Excel.">
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- CSS Stylesheet -->
+  <link rel="stylesheet" href="style.css?v=1.0.3">
+  
+  <!-- Libraries (CDNs) -->
+  <script src="https://unpkg.com/tesseract.js@5.0.3/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+
+  <!-- App Container -->
+  <div class="app-container">
+    
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="logo-icon">
+          <i data-lucide="scan-line" class="glow-icon"></i>
+        </div>
+        <div class="brand-text">
+          <h1>BizCard <span class="accent-text">Snap</span></h1>
+          <p class="subtitle">AI-Powered Business Card OCR & Excel Export Tool</p>
+        </div>
+      </div>
+      
+      <div class="header-actions">
+        <div class="stats-badge">
+          <span class="label">Total Scanned:</span>
+          <span id="stats-count" class="value">0</span>
+        </div>
+        <button id="btn-settings-open" class="btn btn-secondary">
+          <i data-lucide="settings"></i> Settings
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace Layout -->
+    <main class="workspace-grid">
+      
+      <!-- Left Panel: Scanner & Form -->
+      <section class="left-panel">
+        
+        <!-- Capture Card -->
+        <div class="card panel-card glass-panel">
+          <div class="card-header">
+            <h2><i data-lucide="camera"></i> Capture Business Card</h2>
+            <div class="tab-controls">
+              <button id="tab-webcam" class="tab-btn active" onclick="switchCaptureTab('webcam')">Camera</button>
+              <button id="tab-upload" class="tab-btn" onclick="switchCaptureTab('upload')">Upload Photo</button>
+            </div>
+          </div>
+          
+          <div class="card-body">
+            <!-- Webcam Tab Content -->
+            <div id="content-webcam" class="tab-content active">
+              <div class="webcam-viewport">
+                <video id="video-stream" autoplay playsinline muted></video>
+                <div class="camera-guidelines">
+                  <div class="guide-box">
+                    <span class="corner top-left"></span>
+                    <span class="corner top-right"></span>
+                    <span class="corner bottom-left"></span>
+                    <span class="corner bottom-right"></span>
+                    <!-- Moving scanline laser -->
+                    <div id="scan-laser" class="laser"></div>
+                  </div>
+                </div>
+                <div class="camera-fallback-msg hidden" id="camera-error">
+                  <i data-lucide="camera-off" size="48"></i>
+                  <p>Webcam access not available. Please use the "Upload Photo" tab.</p>
+                </div>
+              </div>
+              
+              <div class="camera-actions">
+                <button id="btn-toggle-camera" class="btn btn-circle" title="Switch Camera">
+                  <i data-lucide="refresh-cw"></i>
+                </button>
+                <button id="btn-capture" class="btn btn-primary btn-large">
+                  <i data-lucide="aperture"></i> Capture Photo
+                </button>
+                <div class="camera-select-container">
+                  <select id="camera-select" onchange="changeCamera(this.value)" title="Select webcam device">
+                    <option value="">Loading camera list...</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- Upload Tab Content -->
+            <div id="content-upload" class="tab-content">
+              <div id="dropzone" class="upload-dropzone">
+                <i data-lucide="upload-cloud" class="upload-icon"></i>
+                <p class="dropzone-text">Drag & drop card photo, or <span class="browse-link">browse</span></p>
+                <p class="file-limits">Supports JPG, PNG, WebP up to 10MB</p>
+                <input type="file" id="file-input" accept="image/*" class="hidden">
+              </div>
+            </div>
+
+            <!-- Image Cropper/Preview & Processing Overlay -->
+            <div id="scan-preview-container" class="scan-preview-container hidden">
+              <img id="scan-preview-img" src="" alt="Card Preview">
+              <div id="ocr-overlay" class="ocr-overlay hidden">
+                <div class="loader-spinner"></div>
+                <p id="ocr-status-text">Initializing OCR Engine...</p>
+                <div class="progress-bar-container">
+                  <div id="ocr-progress-bar" class="progress-bar"></div>
+                </div>
+              </div>
+              <button id="btn-recapture" class="btn btn-danger btn-floating" title="Discard and Scan Again">
+                <i data-lucide="trash-2"></i> Discard
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Details Verification Form -->
+        <div class="card panel-card glass-panel" id="verification-panel">
+          <div class="card-header">
+            <h2><i data-lucide="clipboard-signature"></i> Verify Extracted Details</h2>
+            <button id="btn-clear-form" class="btn btn-text" type="button" onclick="clearForm()">Clear</button>
+          </div>
+          
+          <div class="card-body">
+            <!-- Scanned Card Image Reference Preview -->
+            <div id="form-card-preview-container" class="form-card-preview-container hidden">
+              <span class="preview-label"><i data-lucide="image" size="12"></i> Card Photo Reference:</span>
+              <img id="form-card-preview-img" src="" alt="Scanned Card Reference" onclick="previewImageFullscreen(this.src)" title="Click to view full size">
+            </div>
+
+            <form id="card-details-form" onsubmit="saveCardData(event)">
+              <div class="form-grid">
+                <div class="form-group col-6">
+                  <label for="field-name"><i data-lucide="user" size="14"></i> Full Name</label>
+                  <input type="text" id="field-name" placeholder="John Doe" required>
+                </div>
+                
+                <div class="form-group col-6">
+                  <label for="field-company"><i data-lucide="building-2" size="14"></i> Company Name</label>
+                  <input type="text" id="field-company" placeholder="Acme Inc.">
+                </div>
+
+                <div class="form-group col-6">
+                  <label for="field-dept"><i data-lucide="layers" size="14"></i> Department</label>
+                  <input type="text" id="field-dept" placeholder="Engineering / Marketing">
+                </div>
+
+                <div class="form-group col-6">
+                  <label for="field-email"><i data-lucide="mail" size="14"></i> Email Address</label>
+                  <input type="email" id="field-email" placeholder="john.doe@company.com">
+                </div>
+
+                <div class="form-group col-6">
+                  <label for="field-mobile"><i data-lucide="smartphone" size="14"></i> Mobile Phone</label>
+                  <input type="tel" id="field-mobile" placeholder="+1 (555) 019-2834">
+                </div>
+
+                <div class="form-group col-6">
+                  <label for="field-work"><i data-lucide="phone" size="14"></i> Work Phone</label>
+                  <input type="tel" id="field-work" placeholder="+1 (555) 019-2800">
+                </div>
+
+                <div class="form-group col-6">
+                  <label for="field-website"><i data-lucide="globe" size="14"></i> Website URL</label>
+                  <input type="url" id="field-website" placeholder="https://www.company.com">
+                </div>
+
+                <div class="form-group col-6">
+                  <label for="field-linkedin"><i data-lucide="linkedin" size="14"></i> LinkedIn Profile</label>
+                  <input type="url" id="field-linkedin" placeholder="https://linkedin.com/in/johndoe">
+                </div>
+
+                <div class="form-group col-12">
+                  <label for="field-address"><i data-lucide="map-pin" size="14"></i> Physical Address</label>
+                  <input type="text" id="field-address" placeholder="123 Science Park, Suite 400, Austin, TX">
+                </div>
+
+                <div class="form-group col-12">
+                  <label for="field-notes"><i data-lucide="file-text" size="14"></i> Notes / Additional Extracted Text</label>
+                  <textarea id="field-notes" rows="3" placeholder="Any additional text captured from the business card..."></textarea>
+                </div>
+              </div>
+
+              <!-- Invisible input to hold card image base64 -->
+              <input type="hidden" id="field-image-data">
+
+              <div class="form-actions">
+                <button type="submit" id="btn-save-card" class="btn btn-success btn-full">
+                  <i data-lucide="check-circle"></i> Save Card to Record List
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- Right Panel: Database List -->
+      <section class="right-panel">
+        <div class="card panel-card glass-panel flex-column-layout">
+          <div class="card-header flex-header">
+            <div class="header-title">
+              <h2><i data-lucide="database"></i> Scanned Cards Database</h2>
+              <span id="selected-badge" class="count-badge hidden">0 Selected</span>
+            </div>
+            <div class="db-actions">
+              <button id="btn-clear-db" class="btn btn-danger btn-sm" onclick="clearAllCards()">
+                <i data-lucide="trash-2"></i> Clear Database
+              </button>
+            </div>
+          </div>
+
+          <!-- Empty State -->
+          <div id="db-empty-state" class="empty-state">
+            <div class="empty-state-icon">
+              <i data-lucide="credit-card"></i>
+            </div>
+            <h3>No Scanned Cards Yet</h3>
+            <p>Scan a business card using the camera or upload a photo to start populating your spreadsheet list.</p>
+          </div>
+
+          <!-- Cards Scroll Area -->
+          <div id="cards-list-container" class="cards-list-container hidden">
+            <div class="table-container">
+              <table id="cards-table">
+                <thead>
+                  <tr>
+                    <th width="40"><input type="checkbox" id="chk-select-all" onchange="toggleSelectAll(this)"></th>
+                    <th width="80">Photo</th>
+                    <th>Name / Dept</th>
+                    <th>Company</th>
+                    <th>Contact</th>
+                    <th width="80">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="cards-tbody">
+                  <!-- Dynamic rows go here -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Export Control footer -->
+          <div id="export-controls" class="export-controls hidden">
+            <div class="export-options">
+              <label class="export-mode-selector">
+                <input type="radio" name="export-mode" value="zip" checked>
+                <div class="export-mode-card">
+                  <i data-lucide="file-archive"></i>
+                  <div>
+                    <strong>Offline ZIP Package</strong>
+                    <span class="detail">Excel Sheet + Card Images directory with relative links (local-friendly)</span>
+                  </div>
+                </div>
+              </label>
+              
+              <label class="export-mode-selector">
+                <input type="radio" name="export-mode" value="cloud">
+                <div class="export-mode-card">
+                  <i data-lucide="cloud-lightning"></i>
+                  <div>
+                    <strong>Cloud URL Excel</strong>
+                    <span class="detail">Standalone Excel with live links (needs Imgbb API key config)</span>
+                  </div>
+                </div>
+              </label>
+            </div>
+
+            <button id="btn-export-excel" class="btn btn-primary btn-full btn-large" onclick="triggerExport()">
+              <i data-lucide="download"></i> Compile & Export Scanned Data
+            </button>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Slide-out Settings Panel -->
+  <div id="settings-panel" class="settings-drawer">
+    <div class="settings-drawer-overlay" id="settings-overlay"></div>
+    <div class="settings-drawer-content">
+      <div class="drawer-header">
+        <h2><i data-lucide="sliders-horizontal"></i> Configuration Settings</h2>
+        <button id="btn-settings-close-x" class="btn btn-circle btn-sm">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+
+      <div class="drawer-body">
+        <!-- Gemini AI Settings -->
+        <div class="settings-section">
+          <h3>
+            <i data-lucide="sparkles" class="accent-text"></i> 
+            Gemini AI Enhancer (Optional)
+          </h3>
+          <p class="section-desc">By default, BizCard Snap uses intelligent regular expressions to parse text. Toggle on a free Google Gemini key to enable highly accurate AI parsing of messy card details.</p>
+          
+          <div class="form-group">
+            <label for="setting-gemini-key">Gemini API Key</label>
+            <div class="input-with-toggle">
+              <input type="password" id="setting-gemini-key" placeholder="AIzaSy...">
+              <button type="button" class="btn-input-icon" onclick="togglePasswordVisibility('setting-gemini-key')">
+                <i data-lucide="eye" id="setting-gemini-key-eye"></i>
+              </button>
+            </div>
+            <a href="https://aistudio.google.com/" target="_blank" class="setting-link">Get a free Gemini API Key from Google AI Studio &rarr;</a>
+          </div>
+        </div>
+
+        <!-- Imgbb Settings -->
+        <div class="settings-section">
+          <h3>
+            <i data-lucide="image" class="accent-text"></i> 
+            Cloud Image Storage (Optional)
+          </h3>
+          <p class="section-desc">Required if exporting raw Excel sheets with direct web hyperlinks to business card images. Without this, you can still download card photos bundled inside a ZIP package.</p>
+          
+          <div class="form-group">
+            <label for="setting-imgbb-key">Imgbb API Key</label>
+            <div class="input-with-toggle">
+              <input type="password" id="setting-imgbb-key" placeholder="e3d64b...">
+              <button type="button" class="btn-input-icon" onclick="togglePasswordVisibility('setting-imgbb-key')">
+                <i data-lucide="eye" id="setting-imgbb-key-eye"></i>
+              </button>
+            </div>
+            <a href="https://api.imgbb.com/" target="_blank" class="setting-link">Get a free Imgbb API Key &rarr;</a>
+          </div>
+        </div>
+
+        <!-- Sample Mock Data Helper -->
+        <div class="settings-section demo-section">
+          <h3><i data-lucide="dribbble"></i> Quick Demo Sandbox</h3>
+          <p class="section-desc">Want to test the app features without scanning a real business card? Click below to populate the database with realistic sample cards instantly.</p>
+          <button type="button" class="btn btn-secondary btn-full" onclick="loadMockDemoData()">
+            <i data-lucide="plus-square"></i> Load Sample Cards Data
+          </button>
+        </div>
+      </div>
+
+      <div class="drawer-footer">
+        <button id="btn-settings-save" class="btn btn-primary btn-full" onclick="saveSettings()">
+          <i data-lucide="save"></i> Save Settings
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating Toast Notification -->
+  <div id="toast" class="toast hidden">
+    <i id="toast-icon" data-lucide="info"></i>
+    <span id="toast-message">Message text goes here...</span>
+  </div>
+
+  <!-- App Main Javascript Bundle -->
+  <script src="app.js?v=1.0.3"></script>
+</body>
+</html>
