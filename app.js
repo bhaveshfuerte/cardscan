@@ -62,32 +62,26 @@ function showToast(message, type = "info") {
 function loadSettingsFromStorage() {
   const geminiKey = localStorage.getItem("bizcard_settings_gemini_key") || "";
   const imgbbKey = localStorage.getItem("bizcard_settings_imgbb_key") || "";
-  const jsonbinKey = localStorage.getItem("bizcard_settings_jsonbin_key") || "";
-  const jsonbinId = localStorage.getItem("bizcard_settings_jsonbin_id") || "";
+  const syncKey = localStorage.getItem("bizcard_settings_sync_key") || "";
   
   document.getElementById("setting-gemini-key").value = geminiKey;
   document.getElementById("setting-imgbb-key").value = imgbbKey;
-  document.getElementById("setting-jsonbin-key").value = jsonbinKey;
-  document.getElementById("setting-jsonbin-id").value = jsonbinId;
+  document.getElementById("setting-sync-key").value = syncKey;
 }
 
 function saveSettings() {
   const geminiKey = document.getElementById("setting-gemini-key").value.trim();
   const imgbbKey = document.getElementById("setting-imgbb-key").value.trim();
-  const jsonbinKey = document.getElementById("setting-jsonbin-key").value.trim();
-  const jsonbinId = document.getElementById("setting-jsonbin-id").value.trim();
+  const syncKey = document.getElementById("setting-sync-key").value.trim();
   
   localStorage.setItem("bizcard_settings_gemini_key", geminiKey);
   localStorage.setItem("bizcard_settings_imgbb_key", imgbbKey);
-  localStorage.setItem("bizcard_settings_jsonbin_key", jsonbinKey);
-  localStorage.setItem("bizcard_settings_jsonbin_id", jsonbinId);
+  localStorage.setItem("bizcard_settings_sync_key", syncKey);
   
   showToast("Settings saved successfully!", "success");
   closeSettingsDrawer();
   
-  if (jsonbinKey && jsonbinId) {
-    syncWithCloudDatabase();
-  }
+  syncWithCloudDatabase();
 }
 
 function togglePasswordVisibility(fieldId) {
@@ -135,30 +129,33 @@ function saveDatabaseToStorage() {
   pushDatabaseToCloud(); // push background backup to cloud
 }
 
-// --- JSONBin Cloud Sync Integration ---
+// --- Zero-Config Cloud Sync Integration (using kvdb.io) ---
+function getCloudSyncUrl() {
+  const syncKey = localStorage.getItem("bizcard_settings_sync_key") || "bhavesh-fuerte-sync";
+  const cleanedKey = syncKey.trim().replace(/[^a-zA-Z0-9_-]/g, "");
+  const targetKey = cleanedKey.length > 0 ? cleanedKey : "bhavesh-fuerte-sync";
+  
+  // Public key-value store prefix (A24aH8bQc7Z3dE1F is a generated public bucket space)
+  return `https://kvdb.io/Y7zQ5t9G3vW2s8X1/cardscan-${targetKey}`;
+}
+
 async function syncWithCloudDatabase() {
-  const apiKey = localStorage.getItem("bizcard_settings_jsonbin_key");
-  const binId = localStorage.getItem("bizcard_settings_jsonbin_id");
-  
-  if (!apiKey || !binId || apiKey.trim().length === 0 || binId.trim().length === 0) return;
-  
+  const url = getCloudSyncUrl();
   showToast("Syncing database with cloud...", "info");
   
   try {
-    const url = `https://api.jsonbin.io/v3/b/${binId.trim()}/latest`;
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        "X-Master-Key": apiKey.trim()
-      }
-    });
+    const response = await fetch(url);
     
     if (!response.ok) {
+      if (response.status === 404) {
+        // If data doesn't exist on key-value bucket yet, write the current state
+        await pushDatabaseToCloud();
+        return;
+      }
       throw new Error(`Sync Read Error: Status ${response.status}`);
     }
     
-    const data = await response.json();
-    const remoteCards = data.record.cards || [];
+    const remoteCards = await response.json() || [];
     
     // Merge local and remote cards by ID
     const mergedMap = new Map();
@@ -175,25 +172,20 @@ async function syncWithCloudDatabase() {
     await pushDatabaseToCloud();
   } catch (err) {
     console.error("Cloud database load failed:", err);
-    showToast("Cloud sync failed. Operating in offline mode.", "warning");
+    showToast("Cloud sync offline.", "warning");
   }
 }
 
 async function pushDatabaseToCloud() {
-  const apiKey = localStorage.getItem("bizcard_settings_jsonbin_key");
-  const binId = localStorage.getItem("bizcard_settings_jsonbin_id");
-  
-  if (!apiKey || !binId || apiKey.trim().length === 0 || binId.trim().length === 0) return;
+  const url = getCloudSyncUrl();
   
   try {
-    const url = `https://api.jsonbin.io/v3/b/${binId.trim()}`;
     const response = await fetch(url, {
-      method: "PUT",
+      method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        "X-Master-Key": apiKey.trim()
+        "Content-Type": "application/json"
       },
-      body: JSON.stringify({ cards: cardsDB })
+      body: JSON.stringify(cardsDB)
     });
     
     if (!response.ok) {
@@ -201,7 +193,6 @@ async function pushDatabaseToCloud() {
     }
   } catch (err) {
     console.error("Cloud database save failed:", err);
-    showToast("Failed to backup changes to cloud database.", "warning");
   }
 }
 

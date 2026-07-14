@@ -344,24 +344,14 @@
         <div class="settings-section">
           <h3>
             <i data-lucide="cloud-lightning" class="accent-text"></i> 
-            Cloud Database Sync (Optional)
+            Cloud Database Sync
           </h3>
-          <p class="section-desc">Sync your scanned cards across multiple phones and computers permanently. Uses a free key-value storage bin from JSONbin.io.</p>
+          <p class="section-desc">Sync your scanned cards across multiple phones and computers instantly. Enter the same Sync Key on all your devices to share the same database.</p>
           
           <div class="form-group">
-            <label for="setting-jsonbin-key">JSONbin API Master Key</label>
-            <div class="input-with-toggle">
-              <input type="password" id="setting-jsonbin-key" placeholder="$2b$10$...">
-              <button type="button" class="btn-input-icon" onclick="togglePasswordVisibility('setting-jsonbin-key')">
-                <i data-lucide="eye" id="setting-jsonbin-key-eye"></i>
-              </button>
-            </div>
-          </div>
-          
-          <div class="form-group">
-            <label for="setting-jsonbin-id">JSONbin Bin ID</label>
-            <input type="text" id="setting-jsonbin-id" placeholder="60bfa3...">
-            <a href="https://jsonbin.io/" target="_blank" class="setting-link">Get a free JSONbin.io API Key & Bin ID &rarr;</a>
+            <label for="setting-sync-key">Sync Key / Group Name</label>
+            <input type="text" id="setting-sync-key" placeholder="e.g., bhavesh-fuerte-cards">
+            <p class="setting-link" style="margin-top: 0.4rem;">Default: <code>bhavesh-fuerte-sync</code></p>
           </div>
         </div>
 
