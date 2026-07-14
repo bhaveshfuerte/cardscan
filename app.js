@@ -21,6 +21,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   
   // Sync with cloud if configured
   syncWithCloudDatabase();
+  startPeriodicSync();
   
   // Setup DOM Event Listeners
   setupCameraEventListeners();
@@ -58,25 +59,45 @@ function showToast(message, type = "info") {
   }, 4000);
 }
 
-// --- Settings Management (LocalStorage) ---
+// --- Periodic Cloud Sync ---
+let syncIntervalId = null;
+function startPeriodicSync() {
+  if (syncIntervalId) return; // already running
+  syncIntervalId = setInterval(() => {
+    if (document.hidden) return; // skip when tab not visible
+    syncWithCloudDatabase();
+  }, 30000); // every 30 seconds
+}
+
+function stopPeriodicSync() {
+  if (syncIntervalId) {
+    clearInterval(syncIntervalId);
+    syncIntervalId = null;
+  }
+}
+
 function loadSettingsFromStorage() {
   const geminiKey = localStorage.getItem("bizcard_settings_gemini_key") || "";
   const imgbbKey = localStorage.getItem("bizcard_settings_imgbb_key") || "";
   const syncKey = localStorage.getItem("bizcard_settings_sync_key") || "";
+  const extractCompany = localStorage.getItem("bizcard_settings_extract_company") === "true";
   
   document.getElementById("setting-gemini-key").value = geminiKey;
   document.getElementById("setting-imgbb-key").value = imgbbKey;
   document.getElementById("setting-sync-key").value = syncKey;
+  document.getElementById("setting-extract-company").checked = extractCompany;
 }
 
 function saveSettings() {
   const geminiKey = document.getElementById("setting-gemini-key").value.trim();
   const imgbbKey = document.getElementById("setting-imgbb-key").value.trim();
   const syncKey = document.getElementById("setting-sync-key").value.trim();
+  const extractCompany = document.getElementById("setting-extract-company").checked;
   
   localStorage.setItem("bizcard_settings_gemini_key", geminiKey);
   localStorage.setItem("bizcard_settings_imgbb_key", imgbbKey);
   localStorage.setItem("bizcard_settings_sync_key", syncKey);
+  localStorage.setItem("bizcard_settings_extract_company", extractCompany);
   
   showToast("Settings saved successfully!", "success");
   closeSettingsDrawer();
@@ -181,7 +202,7 @@ async function pushDatabaseToCloud() {
   
   try {
     const response = await fetch(url, {
-      method: "POST",
+      method: "PUT",
       headers: {
         "Content-Type": "application/json"
       },
@@ -193,6 +214,7 @@ async function pushDatabaseToCloud() {
     }
   } catch (err) {
     console.error("Cloud database save failed:", err);
+    showToast("Failed to backup changes to cloud database.", "warning");
   }
 }
 
@@ -834,9 +856,9 @@ async function runTesseractOcr(base64Image) {
     
     // Choose Structuring Method: Custom AI Studio or Regex fallback
     const geminiKey = localStorage.getItem("bizcard_settings_gemini_key");
-    
+    const extractCompany = localStorage.getItem("bizcard_settings_extract_company") === "true";
     if (geminiKey && geminiKey.trim().length > 10) {
-      await extractDetailsWithGemini(extractedText, base64Image, geminiKey.trim());
+      await extractDetailsWithGemini(extractedText, base64Image, geminiKey.trim(), extractCompany);
     } else {
       extractDetailsWithRegex(extractedText);
     }
@@ -998,7 +1020,7 @@ function extractDetailsWithRegex(text) {
 }
 
 // --- Gemini 1.5 Flash vision extraction logic ---
-async function extractDetailsWithGemini(ocrText, base64Image, apiKey) {
+async function extractDetailsWithGemini(ocrText, base64Image, apiKey, extractCompany = false) {
   try {
     updateOcrStatus("Refining details with Gemini AI...", 98);
     
@@ -1070,6 +1092,11 @@ async function extractDetailsWithGemini(ocrText, base64Image, apiKey) {
     responseText = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
     
     const details = JSON.parse(responseText);
+
+    // Optionally clear company field if extraction disabled
+    if (!extractCompany) {
+      details.company = "";
+    }
     
     // Set details to form fields
     document.getElementById("field-name").value = details.name || "";
