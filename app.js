@@ -11,13 +11,16 @@ let editingCardId = null; // null if creating, holds ID if editing
 let activeDeviceId = null; // holds selected camera hardware ID
 
 // --- Initialization ---
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   // Initialize Lucide Icons
   lucide.createIcons();
   
   // Load settings and database from local storage
   loadSettingsFromStorage();
   loadDatabaseFromStorage();
+  
+  // Sync with cloud if configured
+  syncWithCloudDatabase();
   
   // Setup DOM Event Listeners
   setupCameraEventListeners();
@@ -59,20 +62,32 @@ function showToast(message, type = "info") {
 function loadSettingsFromStorage() {
   const geminiKey = localStorage.getItem("bizcard_settings_gemini_key") || "";
   const imgbbKey = localStorage.getItem("bizcard_settings_imgbb_key") || "";
+  const jsonbinKey = localStorage.getItem("bizcard_settings_jsonbin_key") || "";
+  const jsonbinId = localStorage.getItem("bizcard_settings_jsonbin_id") || "";
   
   document.getElementById("setting-gemini-key").value = geminiKey;
   document.getElementById("setting-imgbb-key").value = imgbbKey;
+  document.getElementById("setting-jsonbin-key").value = jsonbinKey;
+  document.getElementById("setting-jsonbin-id").value = jsonbinId;
 }
 
 function saveSettings() {
   const geminiKey = document.getElementById("setting-gemini-key").value.trim();
   const imgbbKey = document.getElementById("setting-imgbb-key").value.trim();
+  const jsonbinKey = document.getElementById("setting-jsonbin-key").value.trim();
+  const jsonbinId = document.getElementById("setting-jsonbin-id").value.trim();
   
   localStorage.setItem("bizcard_settings_gemini_key", geminiKey);
   localStorage.setItem("bizcard_settings_imgbb_key", imgbbKey);
+  localStorage.setItem("bizcard_settings_jsonbin_key", jsonbinKey);
+  localStorage.setItem("bizcard_settings_jsonbin_id", jsonbinId);
   
   showToast("Settings saved successfully!", "success");
   closeSettingsDrawer();
+  
+  if (jsonbinKey && jsonbinId) {
+    syncWithCloudDatabase();
+  }
 }
 
 function togglePasswordVisibility(fieldId) {
@@ -117,6 +132,77 @@ function loadDatabaseFromStorage() {
 function saveDatabaseToStorage() {
   localStorage.setItem("bizcards_db", JSON.stringify(cardsDB));
   renderDatabase();
+  pushDatabaseToCloud(); // push background backup to cloud
+}
+
+// --- JSONBin Cloud Sync Integration ---
+async function syncWithCloudDatabase() {
+  const apiKey = localStorage.getItem("bizcard_settings_jsonbin_key");
+  const binId = localStorage.getItem("bizcard_settings_jsonbin_id");
+  
+  if (!apiKey || !binId || apiKey.trim().length === 0 || binId.trim().length === 0) return;
+  
+  showToast("Syncing database with cloud...", "info");
+  
+  try {
+    const url = `https://api.jsonbin.io/v3/b/${binId.trim()}/latest`;
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "X-Master-Key": apiKey.trim()
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Sync Read Error: Status ${response.status}`);
+    }
+    
+    const data = await response.json();
+    const remoteCards = data.record.cards || [];
+    
+    // Merge local and remote cards by ID
+    const mergedMap = new Map();
+    cardsDB.forEach(c => mergedMap.set(c.id, c));
+    remoteCards.forEach(c => mergedMap.set(c.id, c));
+    
+    cardsDB = Array.from(mergedMap.values());
+    localStorage.setItem("bizcards_db", JSON.stringify(cardsDB));
+    renderDatabase();
+    
+    showToast("Database synced with cloud!", "success");
+    
+    // Push back merged state to cloud
+    await pushDatabaseToCloud();
+  } catch (err) {
+    console.error("Cloud database load failed:", err);
+    showToast("Cloud sync failed. Operating in offline mode.", "warning");
+  }
+}
+
+async function pushDatabaseToCloud() {
+  const apiKey = localStorage.getItem("bizcard_settings_jsonbin_key");
+  const binId = localStorage.getItem("bizcard_settings_jsonbin_id");
+  
+  if (!apiKey || !binId || apiKey.trim().length === 0 || binId.trim().length === 0) return;
+  
+  try {
+    const url = `https://api.jsonbin.io/v3/b/${binId.trim()}`;
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Master-Key": apiKey.trim()
+      },
+      body: JSON.stringify({ cards: cardsDB })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Sync Push Error: Status ${response.status}`);
+    }
+  } catch (err) {
+    console.error("Cloud database save failed:", err);
+    showToast("Failed to backup changes to cloud database.", "warning");
+  }
 }
 
 function renderDatabase() {
