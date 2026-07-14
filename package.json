@@ -1,0 +1,12 @@
+{
+  "name": "cardscan",
+  "version": "1.0.3",
+  "description": "BizCard Snap Business Card Scanner",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
