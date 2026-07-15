@@ -11,4 +11,3 @@ yarn-error.log*
 scratch/
 node_modules/
 database.sqlite
-database.json
