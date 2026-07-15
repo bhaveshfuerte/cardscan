@@ -19,6 +19,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Load database from Node.js server
   await loadDatabaseFromServer();
   
+  // Periodically refresh list from backend database to sync multi-device scans
+  setInterval(async () => {
+    // Only refresh if tab is active to save resources
+    if (!document.hidden) {
+      await loadDatabaseFromServer();
+    }
+  }, 10000); // 10 seconds
+  
   // Setup DOM Event Listeners
   setupCameraEventListeners();
   setupUploadEventListeners();
