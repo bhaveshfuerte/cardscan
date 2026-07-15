@@ -16,9 +16,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Initialize Lucide Icons
   lucide.createIcons();
   
-  // Load settings and database from local storage
+  // Load settings and database
   loadSettingsFromStorage();
-  loadDatabaseFromStorage();
+  await loadDatabaseFromServer();
   
   // Sync with cloud if configured
   syncWithCloudDatabase();
@@ -140,6 +140,28 @@ function loadDatabaseFromStorage() {
     } catch (e) {
       console.error("Failed to parse database", e);
       cardsDB = [];
+    }
+  }
+  renderDatabase();
+}
+
+async function loadDatabaseFromServer() {
+  try {
+    const response = await fetch("/api/cards");
+    if (response.ok) {
+      cardsDB = await response.json();
+    } else {
+      throw new Error(`Load Error: Status ${response.status}`);
+    }
+  } catch (e) {
+    console.error("Failed to load cards from server, falling back to LocalStorage:", e);
+    const saved = localStorage.getItem("bizcards_db");
+    if (saved) {
+      try {
+        cardsDB = JSON.parse(saved);
+      } catch (err) {
+        cardsDB = [];
+      }
     }
   }
   renderDatabase();
@@ -333,6 +355,15 @@ function handleSelectRow(id, isChecked) {
     // Update select all checkbox state
     const allChecked = cardsDB.every(c => c.selected);
     document.getElementById("chk-select-all").checked = allChecked;
+    
+    saveDatabaseToStorage();
+    
+    // Update on server in background
+    fetch(`/api/cards/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selected: isChecked })
+    }).catch(e => console.error("Failed to update selection on server:", e));
   }
 }
 
@@ -340,6 +371,11 @@ function toggleSelectAll(masterChk) {
   const checked = masterChk.checked;
   cardsDB.forEach(card => {
     card.selected = checked;
+    fetch(`/api/cards/${card.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selected: checked })
+    }).catch(e => console.error("Failed to update selection on server:", e));
   });
   saveDatabaseToStorage();
 }
@@ -391,23 +427,46 @@ function loadMockDemoData() {
   ];
   
   cardsDB = [...cardsDB, ...mockCards];
+  
+  // Save all mock cards to server in background
+  mockCards.forEach(card => {
+    fetch("/api/cards", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(card)
+    }).catch(e => console.error("Failed to post mock card:", e));
+  });
+
   saveDatabaseToStorage();
   closeSettingsDrawer();
   showToast("Sample cards loaded into database", "success");
 }
 
-function clearAllCards() {
+async function clearAllCards() {
   if (confirm("Are you sure you want to delete ALL scanned cards in the database?")) {
+    const deletePromises = cardsDB.map(card => 
+      fetch(`/api/cards/${card.id}`, { method: "DELETE" }).catch(e => console.error(e))
+    );
+    await Promise.all(deletePromises);
+    
     cardsDB = [];
     saveDatabaseToStorage();
     showToast("Database cleared", "info");
   }
 }
 
-function deleteCard(id) {
+async function deleteCard(id) {
   cardsDB = cardsDB.filter(c => c.id !== id);
   saveDatabaseToStorage();
   showToast("Card deleted", "info");
+  
+  try {
+    await fetch(`/api/cards/${id}`, {
+      method: "DELETE"
+    });
+  } catch (err) {
+    console.error("Failed to delete card from server:", err);
+  }
 }
 
 // Edit card trigger
@@ -465,8 +524,8 @@ function clearForm() {
   lucide.createIcons();
 }
 
-function saveCardData(event) {
-  event.preventDefault();
+async function saveCardData(event) {
+  if (event) event.preventDefault();
   
   const name = document.getElementById("field-name").value.trim();
   const company = document.getElementById("field-company").value.trim();
@@ -484,12 +543,23 @@ function saveCardData(event) {
     // Update existing
     const cardIdx = cardsDB.findIndex(c => c.id === editingCardId);
     if (cardIdx !== -1) {
-      cardsDB[cardIdx] = {
+      const updatedCard = {
         ...cardsDB[cardIdx],
         name, company, dept, email, mobile, work, website, linkedin, address, notes,
-        image: image || cardsDB[cardIdx].image // keep existing if new is blank
+        image: image || cardsDB[cardIdx].image
       };
+      cardsDB[cardIdx] = updatedCard;
       showToast("Card updated", "success");
+      
+      try {
+        await fetch(`/api/cards/${editingCardId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updatedCard)
+        });
+      } catch (err) {
+        console.error("Failed to save update to server:", err);
+      }
     }
   } else {
     // Add new
@@ -501,6 +571,16 @@ function saveCardData(event) {
     };
     cardsDB.push(newCard);
     showToast("Card saved to database", "success");
+    
+    try {
+      await fetch("/api/cards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newCard)
+      });
+    } catch (err) {
+      console.error("Failed to save new card to server:", err);
+    }
   }
   
   saveDatabaseToStorage();
@@ -928,7 +1008,11 @@ async function runTesseractOcr(base64Image) {
 
 // --- Regex Parsing (Local Fallback Heuristics) ---
 function extractDetailsWithRegex(text) {
-  const lines = text.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+  // Normalize line endings and filter out completely blank/nonsense lines
+  let lines = text.split("\n")
+    .map(l => l.trim())
+    .map(l => l.replace(/^[|•©\s\-#+:]+|[|•©\s\-#+:]+$/g, "").trim()) // strip noise characters at boundaries
+    .filter(l => l.length > 1);
   
   let name = "";
   let company = "";
@@ -946,7 +1030,7 @@ function extractDetailsWithRegex(text) {
   const webRegex = /(https?:\/\/)?(www\.)?([a-zA-Z0-9-]+\.[a-zA-Z]{2,})(\/[a-zA-Z0-9-._~:\/?#[\]@!$&'()*+,;=]*)?/i;
   const linkedinRegex = /(https?:\/\/)?(www\.)?linkedin\.com\/in\/[a-zA-Z0-9_-]+/i;
   
-  // 1. Extract email
+  // 1. Extract email first
   for (const line of lines) {
     const match = line.match(emailRegex);
     if (match) {
@@ -955,10 +1039,11 @@ function extractDetailsWithRegex(text) {
     }
   }
   
-  // 2. Extract phone numbers (mobile & work)
+  // 2. Extract phone numbers
   let phoneMatches = [];
   let phoneMatch;
-  while ((phoneMatch = phoneLooseRegex.exec(text)) !== null) {
+  const tempText = lines.join(" ");
+  while ((phoneMatch = phoneLooseRegex.exec(tempText)) !== null) {
     const cleaned = phoneMatch[0].replace(/[^0-9]/g, "");
     if (cleaned.length >= 7 && cleaned.length <= 15) {
       phoneMatches.push(phoneMatch[0].trim());
@@ -990,61 +1075,93 @@ function extractDetailsWithRegex(text) {
       }
     }
   }
-  
-  // 4. Try parsing Name, Dept, Company via position-based line heuristics
-  const filteredLines = lines.filter(line => {
-    const isEmail = emailRegex.test(line);
-    const isWeb = webRegex.test(line);
-    const hasPhone = /[0-9]{5,}/.test(line.replace(/[^0-9]/g, ""));
-    return !isEmail && !isWeb && !hasPhone;
-  });
-  
-  const deptKeywords = ["development", "engineering", "sales", "marketing", "operations", "finance", "accounting", "hr", "human resources", "product", "design", "creative", "support", "customer service", "legal"];
-  
-  if (filteredLines.length > 0) {
-    name = filteredLines[0]; // first line is assumed name
-  }
-  
-  if (filteredLines.length > 1) {
-    const line1 = filteredLines[1];
-    const containsDeptKeyword = deptKeywords.some(keyword => line1.toLowerCase().includes(keyword));
-    
-    if (containsDeptKeyword) {
-      dept = line1;
-      if (filteredLines.length > 2) company = filteredLines[2];
-    } else {
-      company = line1;
-      // check if third line contains dept keywords
-      if (filteredLines.length > 2) {
-        const line2 = filteredLines[2];
-        if (deptKeywords.some(keyword => line2.toLowerCase().includes(keyword))) {
-          dept = line2;
-        }
-      }
-    }
-  }
-  
-  // 5. Build Address from leftover lines containing keywords
-  const addressKeywords = ["street", "st", "drive", "dr", "lane", "ln", "road", "rd", "avenue", "ave", "boulevard", "blvd", "suite", "ste", "floor", "fl", "building", "bldg", "plaza", "highway", "hwy", "box", "p.o.", "way", "parkway", "pkwy"];
+
+  // 4. Identify Address lines
+  const addressKeywords = ["street", "st", "drive", "dr", "lane", "ln", "road", "rd", "avenue", "ave", "boulevard", "blvd", "suite", "ste", "floor", "fl", "building", "bldg", "plaza", "highway", "hwy", "box", "p.o.", "way", "parkway", "pkwy", "zip", "road", "state", "city", "country"];
   const addressParts = [];
   
   lines.forEach(line => {
-    // Skip matched elements
-    if (line === name || line === dept || line === company || line.includes(email) || (website && line.includes(website)) || (linkedin && line.includes(linkedin)) || (mobile && line.includes(mobile)) || (work && line.includes(work))) {
-      return;
-    }
-    
     const lowerLine = line.toLowerCase();
     const hasAddressKw = addressKeywords.some(kw => new RegExp(`\\b${kw}\\b`, "i").test(lowerLine));
-    const hasStateZip = /[A-Z]{2}\s+\d{5}/.test(line) || /\b\d{5}\b/.test(line); // state codes or zipcode
-    
+    const hasStateZip = /[A-Z]{2}\s+\d{5}/.test(line) || /\b\d{5}\b/.test(line) || /\b\d{6}\b/.test(line); // state codes or zipcode (5 or 6 digit)
     if (hasAddressKw || hasStateZip) {
-      addressParts.push(line);
+      const digitRatio = (line.replace(/[^0-9]/g, "").length) / line.length;
+      if (digitRatio < 0.4 && !line.includes("@") && !webRegex.test(line)) {
+        addressParts.push(line);
+      }
     }
   });
-  
   if (addressParts.length > 0) {
     address = addressParts.join(", ");
+  }
+
+  // Filter out matches to parse Name, Title/Dept, and Company
+  const remainingLines = lines.filter(line => {
+    const isEmail = emailRegex.test(line);
+    const isWeb = webRegex.test(line);
+    const isPhone = phoneMatches.some(p => line.includes(p)) || /[0-9]{7,}/.test(line.replace(/[^0-9]/g, ""));
+    const isAddress = addressParts.includes(line);
+    
+    return !isEmail && !isWeb && !isPhone && !isAddress;
+  });
+
+  const deptKeywords = ["development", "engineering", "sales", "marketing", "operations", "finance", "accounting", "hr", "human resources", "product", "design", "creative", "support", "customer service", "legal"];
+  const jobTitles = ["ceo", "founder", "president", "director", "manager", "engineer", "developer", "consultant", "partner", "accountant", "vp", "vice president", "lead", "officer", "specialist"];
+  const companySuffixes = ["inc", "ltd", "corp", "llc", "group", "solutions", "technologies", "associates", "company", "co."];
+
+  // Smarter heuristic for Name selection
+  let nameIndex = -1;
+  for (let i = 0; i < remainingLines.length; i++) {
+    const line = remainingLines[i];
+    const words = line.split(/\s+/);
+    // Ignore lines that contain known suffixes or titles
+    const hasSuffix = companySuffixes.some(s => line.toLowerCase().includes(s));
+    const hasJobTitle = jobTitles.some(t => new RegExp(`\\b${t}\\b`, "i").test(line.toLowerCase()));
+    
+    // A name usually has 2-4 words, capitalized first letters, and no digits
+    if (words.length >= 2 && words.length <= 4 && !hasSuffix && !hasJobTitle && !/[0-9]/.test(line)) {
+      name = line;
+      nameIndex = i;
+      break;
+    }
+  }
+
+  // Fallback to first line if no good candidate found
+  if (!name && remainingLines.length > 0) {
+    name = remainingLines[0];
+    nameIndex = 0;
+  }
+
+  // Filter out the selected name
+  const linesForTitleAndCompany = remainingLines.filter((_, idx) => idx !== nameIndex);
+
+  // Identify Department / Title
+  for (let i = 0; i < linesForTitleAndCompany.length; i++) {
+    const line = linesForTitleAndCompany[i];
+    const lowerLine = line.toLowerCase();
+    const hasDeptKw = deptKeywords.some(kw => lowerLine.includes(kw));
+    const hasTitle = jobTitles.some(t => new RegExp(`\\b${t}\\b`, "i").test(lowerLine));
+    
+    if (hasDeptKw || hasTitle) {
+      dept = line;
+      linesForTitleAndCompany.splice(i, 1);
+      break;
+    }
+  }
+
+  // Identify Company
+  for (let i = 0; i < linesForTitleAndCompany.length; i++) {
+    const line = linesForTitleAndCompany[i];
+    const hasSuffix = companySuffixes.some(s => new RegExp(`\\b${s}\\b`, "i").test(line.toLowerCase()));
+    if (hasSuffix) {
+      company = line;
+      linesForTitleAndCompany.splice(i, 1);
+      break;
+    }
+  }
+
+  if (!company && linesForTitleAndCompany.length > 0) {
+    company = linesForTitleAndCompany[0];
   }
 
   // Set values into inputs
@@ -1070,7 +1187,7 @@ function extractDetailsWithRegex(text) {
   
   // Hide loader
   document.getElementById("ocr-overlay").classList.add("hidden");
-  showToast("OCR complete! Please check and confirm fields.", "success");
+  showToast("OCR complete! Set Gemini API Key in Settings for best results.", "success");
   
   if (isWebcamCapture) {
     saveCardData();
