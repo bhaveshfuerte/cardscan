@@ -8,6 +8,7 @@ let currentOcrImage = null; // Base64 data of image currently being scanned
 let isProcessing = false;
 let activeTab = "webcam";
 let editingCardId = null; // null if creating, holds ID if editing
+let isWebcamCapture = false; // true if the current scan came from webcam capture
 let activeDeviceId = null; // holds selected camera hardware ID
 
 // --- Initialization ---
@@ -690,16 +691,52 @@ function capturePhoto() {
     height = video.clientHeight || 480;
   }
   
+  const displayWidth = video.clientWidth || width;
+  const displayHeight = video.clientHeight || height;
+  
+  // Guide box is 85% width, 80% height, centered inside video element
+  const elementWidth = displayWidth * 0.85;
+  const elementHeight = displayHeight * 0.80;
+  const elementLeft = (displayWidth - elementWidth) / 2;
+  const elementTop = (displayHeight - elementHeight) / 2;
+  
+  // Map display coordinates to video feed coordinates (accounting for object-fit: cover)
+  const videoRatio = width / height;
+  const elementRatio = displayWidth / displayHeight;
+  let scale, xOffset = 0, yOffset = 0;
+
+  if (videoRatio > elementRatio) {
+    // Video is wider than display container
+    scale = height / displayHeight;
+    xOffset = (width - displayWidth * scale) / 2;
+  } else {
+    // Video is taller than display container
+    scale = width / displayWidth;
+    yOffset = (height - displayHeight * scale) / 2;
+  }
+
+  const cropX = elementLeft * scale + xOffset;
+  const cropY = elementTop * scale + yOffset;
+  const cropWidth = elementWidth * scale;
+  const cropHeight = elementHeight * scale;
+  
   // Capture snapshot on hidden canvas
   const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = cropWidth;
+  canvas.height = cropHeight;
   const ctx = canvas.getContext("2d");
-  ctx.drawImage(video, 0, 0, width, height);
+  
+  // Crop the source video stream
+  ctx.drawImage(
+    video,
+    cropX, cropY, cropWidth, cropHeight, // source crop parameters
+    0, 0, cropWidth, cropHeight          // destination canvas parameters
+  );
   
   const base64Image = canvas.toDataURL("image/jpeg", 0.9);
   stopCamera();
   
+  isWebcamCapture = true;
   processImageForOcr(base64Image);
 }
 
@@ -743,6 +780,7 @@ function handleImageFile(file) {
     return;
   }
   
+  isWebcamCapture = false;
   const reader = new FileReader();
   reader.onload = (e) => {
     processImageForOcr(e.target.result);
@@ -1017,6 +1055,10 @@ function extractDetailsWithRegex(text) {
   // Hide loader
   document.getElementById("ocr-overlay").classList.add("hidden");
   showToast("OCR complete! Please check and confirm fields.", "success");
+  
+  if (isWebcamCapture) {
+    saveCardData();
+  }
 }
 
 // --- Gemini 1.5 Flash vision extraction logic ---
@@ -1124,6 +1166,9 @@ async function extractDetailsWithGemini(ocrText, base64Image, apiKey, extractCom
     document.getElementById("ocr-overlay").classList.add("hidden");
     showToast("Gemini AI successfully extracted details!", "success");
     
+    if (isWebcamCapture) {
+      saveCardData();
+    }
   } catch (err) {
     console.error("Gemini Extraction Error:", err);
     showToast("Gemini AI failed, using default regex parsing instead...", "warning");
