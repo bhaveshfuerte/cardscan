@@ -10,3 +10,4 @@ yarn-error.log*
 .tempmediaStorage/
 scratch/
 node_modules/
+database.sqlite
