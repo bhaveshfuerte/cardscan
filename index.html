@@ -43,9 +43,6 @@
           <span class="label">Total Scanned:</span>
           <span id="stats-count" class="value">0</span>
         </div>
-        <button id="btn-settings-open" class="btn btn-secondary">
-          <i data-lucide="settings"></i> Settings
-        </button>
       </div>
     </header>
 
@@ -256,32 +253,8 @@
 
           <!-- Export Control footer -->
           <div id="export-controls" class="export-controls hidden">
-            <div class="export-options">
-              <label class="export-mode-selector">
-                <input type="radio" name="export-mode" value="zip" checked>
-                <div class="export-mode-card">
-                  <i data-lucide="file-archive"></i>
-                  <div>
-                    <strong>Offline ZIP Package</strong>
-                    <span class="detail">Excel Sheet + Card Images directory with relative links (local-friendly)</span>
-                  </div>
-                </div>
-              </label>
-              
-              <label class="export-mode-selector">
-                <input type="radio" name="export-mode" value="cloud">
-                <div class="export-mode-card">
-                  <i data-lucide="cloud-lightning"></i>
-                  <div>
-                    <strong>Cloud URL Excel</strong>
-                    <span class="detail">Standalone Excel with live links (needs Imgbb API key config)</span>
-                  </div>
-                </div>
-              </label>
-            </div>
-
             <button id="btn-export-excel" class="btn btn-primary btn-full btn-large" onclick="triggerExport()">
-              <i data-lucide="download"></i> Compile & Export Scanned Data
+              <i data-lucide="download"></i> Compile & Export ZIP (Excel + Images)
             </button>
           </div>
         </div>
@@ -290,94 +263,7 @@
     </main>
   </div>
 
-  <!-- Slide-out Settings Panel -->
-  <div id="settings-panel" class="settings-drawer">
-    <div class="settings-drawer-overlay" id="settings-overlay"></div>
-    <div class="settings-drawer-content">
-      <div class="drawer-header">
-        <h2><i data-lucide="sliders-horizontal"></i> Configuration Settings</h2>
-        <button id="btn-settings-close-x" class="btn btn-circle btn-sm">
-          <i data-lucide="x"></i>
-        </button>
-      </div>
 
-      <div class="drawer-body">
-        <!-- Gemini AI Settings -->
-        <div class="settings-section">
-          <h3>
-            <i data-lucide="sparkles" class="accent-text"></i> 
-            Gemini AI Enhancer (Optional)
-          </h3>
-          <p class="section-desc">By default, BizCard Snap uses intelligent regular expressions to parse text. Toggle on a free Google Gemini key to enable highly accurate AI parsing of messy card details.</p>
-          
-          <div class="form-group">
-            <label for="setting-gemini-key">Gemini API Key</label>
-            <div class="input-with-toggle">
-              <input type="password" id="setting-gemini-key" placeholder="AIzaSy...">
-              <button type="button" class="btn-input-icon" onclick="togglePasswordVisibility('setting-gemini-key')">
-                <i data-lucide="eye" id="setting-gemini-key-eye"></i>
-              </button>
-            </div>
-            <a href="https://aistudio.google.com/" target="_blank" class="setting-link">Get a free Gemini API Key from Google AI Studio &rarr;</a>
-          </div>
-        </div>
-
-        <!-- Imgbb Settings -->
-        <div class="settings-section">
-          <h3>
-            <i data-lucide="image" class="accent-text"></i> 
-            Cloud Image Storage (Optional)
-          </h3>
-          <p class="section-desc">Required if exporting raw Excel sheets with direct web hyperlinks to business card images. Without this, you can still download card photos bundled inside a ZIP package.</p>
-          
-          <div class="form-group">
-            <label for="setting-imgbb-key">Imgbb API Key</label>
-            <div class="input-with-toggle">
-              <input type="password" id="setting-imgbb-key" placeholder="e3d64b...">
-              <button type="button" class="btn-input-icon" onclick="togglePasswordVisibility('setting-imgbb-key')">
-                <i data-lucide="eye" id="setting-imgbb-key-eye"></i>
-              </button>
-            </div>
-            <a href="https://api.imgbb.com/" target="_blank" class="setting-link">Get a free Imgbb API Key &rarr;</a>
-          </div>
-        <!-- Cloud Database Sync Settings -->
-        <div class="settings-section">
-          <h3>
-            <i data-lucide="cloud-lightning" class="accent-text"></i> 
-            Cloud Database Sync
-          </h3>
-          <p class="section-desc">Sync your scanned cards across multiple phones and computers instantly. Enter the same Sync Key on all your devices to share the same database.</p>
-          
-          <div class="form-group">
-            <label for="setting-sync-key">Sync Key / Group Name</label>
-            <input type="text" id="setting-sync-key" placeholder="e.g., bhavesh-fuerte-cards">
-            <p class="setting-link" style="margin-top: 0.4rem;">Default: <code>bhavesh-fuerte-sync</code></p>
-          </div>
-                    <div class="form-group">
-              <label for="setting-extract-company">
-                <input type="checkbox" id="setting-extract-company">
-                Extract Company Name from Logo (requires Gemini)
-              </label>
-            </div>
-        </div>
-
-        <!-- Sample Mock Data Helper -->
-        <div class="settings-section demo-section">
-          <h3><i data-lucide="dribbble"></i> Quick Demo Sandbox</h3>
-          <p class="section-desc">Want to test the app features without scanning a real business card? Click below to populate the database with realistic sample cards instantly.</p>
-          <button type="button" class="btn btn-secondary btn-full" onclick="loadMockDemoData()">
-            <i data-lucide="plus-square"></i> Load Sample Cards Data
-          </button>
-        </div>
-      </div>
-
-      <div class="drawer-footer">
-        <button id="btn-settings-save" class="btn btn-primary btn-full" onclick="saveSettings()">
-          <i data-lucide="save"></i> Save Settings
-        </button>
-      </div>
-    </div>
-  </div>
 
   <!-- Floating Toast Notification -->
   <div id="toast" class="toast hidden">

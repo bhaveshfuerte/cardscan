@@ -16,13 +16,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Initialize Lucide Icons
   lucide.createIcons();
   
-  // Load settings and database
-  loadSettingsFromStorage();
+  // Load database from Node.js server
   await loadDatabaseFromServer();
-  
-  // Sync with cloud if configured
-  syncWithCloudDatabase();
-  startPeriodicSync();
   
   // Setup DOM Event Listeners
   setupCameraEventListeners();
@@ -60,91 +55,7 @@ function showToast(message, type = "info") {
   }, 4000);
 }
 
-// --- Periodic Cloud Sync ---
-let syncIntervalId = null;
-function startPeriodicSync() {
-  if (syncIntervalId) return; // already running
-  syncIntervalId = setInterval(() => {
-    if (document.hidden) return; // skip when tab not visible
-    syncWithCloudDatabase();
-  }, 30000); // every 30 seconds
-}
-
-function stopPeriodicSync() {
-  if (syncIntervalId) {
-    clearInterval(syncIntervalId);
-    syncIntervalId = null;
-  }
-}
-
-function loadSettingsFromStorage() {
-  const geminiKey = localStorage.getItem("bizcard_settings_gemini_key") || "";
-  const imgbbKey = localStorage.getItem("bizcard_settings_imgbb_key") || "";
-  const syncKey = localStorage.getItem("bizcard_settings_sync_key") || "";
-  const extractCompany = localStorage.getItem("bizcard_settings_extract_company") === "true";
-  
-  document.getElementById("setting-gemini-key").value = geminiKey;
-  document.getElementById("setting-imgbb-key").value = imgbbKey;
-  document.getElementById("setting-sync-key").value = syncKey;
-  document.getElementById("setting-extract-company").checked = extractCompany;
-}
-
-function saveSettings() {
-  const geminiKey = document.getElementById("setting-gemini-key").value.trim();
-  const imgbbKey = document.getElementById("setting-imgbb-key").value.trim();
-  const syncKey = document.getElementById("setting-sync-key").value.trim();
-  const extractCompany = document.getElementById("setting-extract-company").checked;
-  
-  localStorage.setItem("bizcard_settings_gemini_key", geminiKey);
-  localStorage.setItem("bizcard_settings_imgbb_key", imgbbKey);
-  localStorage.setItem("bizcard_settings_sync_key", syncKey);
-  localStorage.setItem("bizcard_settings_extract_company", extractCompany);
-  
-  showToast("Settings saved successfully!", "success");
-  closeSettingsDrawer();
-  
-  syncWithCloudDatabase();
-}
-
-function togglePasswordVisibility(fieldId) {
-  const input = document.getElementById(fieldId);
-  const icon = document.getElementById(`${fieldId}-eye`);
-  if (input.type === "password") {
-    input.type = "text";
-    icon.setAttribute("data-lucide", "eye-off");
-  } else {
-    input.type = "password";
-    icon.setAttribute("data-lucide", "eye");
-  }
-  lucide.createIcons();
-}
-
-// Settings Drawer Actions
-const settingsDrawer = document.getElementById("settings-panel");
-document.getElementById("btn-settings-open").addEventListener("click", () => {
-  settingsDrawer.classList.add("active");
-});
-document.getElementById("btn-settings-close-x").addEventListener("click", closeSettingsDrawer);
-document.getElementById("settings-overlay").addEventListener("click", closeSettingsDrawer);
-
-function closeSettingsDrawer() {
-  settingsDrawer.classList.remove("active");
-}
-
-// --- Database Management (LocalStorage) ---
-function loadDatabaseFromStorage() {
-  const saved = localStorage.getItem("bizcards_db");
-  if (saved) {
-    try {
-      cardsDB = JSON.parse(saved);
-    } catch (e) {
-      console.error("Failed to parse database", e);
-      cardsDB = [];
-    }
-  }
-  renderDatabase();
-}
-
+// --- Database Management ---
 async function loadDatabaseFromServer() {
   try {
     const response = await fetch("/api/cards");
@@ -170,91 +81,6 @@ async function loadDatabaseFromServer() {
 function saveDatabaseToStorage() {
   localStorage.setItem("bizcards_db", JSON.stringify(cardsDB));
   renderDatabase();
-  pushDatabaseToCloud(); // push background backup to cloud
-}
-
-// --- Zero-Config Cloud Sync Integration (using kvdb.io) ---
-function getCloudSyncUrl() {
-  const syncKey = localStorage.getItem("bizcard_settings_sync_key") || "bhavesh-fuerte-sync";
-  const cleanedKey = syncKey.trim().replace(/[^a-zA-Z0-9_-]/g, "");
-  const targetKey = cleanedKey.length > 0 ? cleanedKey : "bhavesh-fuerte-sync";
-  
-  // Public key-value store prefix (A24aH8bQc7Z3dE1F is a generated public bucket space)
-  return `https://kvdb.io/Y7zQ5t9G3vW2s8X1/cardscan-${targetKey}`;
-}
-
-async function syncWithCloudDatabase() {
-  const url = getCloudSyncUrl();
-  showToast("Syncing database with cloud...", "info");
-  
-  try {
-    const response = await fetch(url);
-    
-    if (!response.ok) {
-      if (response.status === 404) {
-        // If data doesn't exist on key-value bucket yet, write the current state
-        await pushDatabaseToCloud();
-        return;
-      }
-      throw new Error(`Sync Read Error: Status ${response.status}`);
-    }
-    
-    const remoteCards = await response.json() || [];
-    
-    // Merge local and remote cards by ID
-    const mergedMap = new Map();
-    cardsDB.forEach(c => mergedMap.set(c.id, c));
-    
-    remoteCards.forEach(c => {
-      const localCard = mergedMap.get(c.id);
-      if (localCard && localCard.image && localCard.image.startsWith("data:image/") && localCard.image.length > 5000) {
-        c.image = localCard.image;
-      }
-      mergedMap.set(c.id, c);
-    });
-    
-    cardsDB = Array.from(mergedMap.values());
-    localStorage.setItem("bizcards_db", JSON.stringify(cardsDB));
-    renderDatabase();
-    
-    showToast("Database synced with cloud!", "success");
-    
-    // Push back merged state to cloud
-    await pushDatabaseToCloud();
-  } catch (err) {
-    console.error("Cloud database load failed:", err);
-    showToast("Cloud sync offline.", "warning");
-  }
-}
-
-async function pushDatabaseToCloud() {
-  const url = getCloudSyncUrl();
-  
-  try {
-    // Strip large base64 images from the sync payload to prevent exceeding kvdb.io's 64KB limit
-    const syncPayload = cardsDB.map(card => {
-      const cleanCard = { ...card };
-      if (cleanCard.image && cleanCard.image.startsWith("data:image/") && cleanCard.image.length > 5000) {
-        cleanCard.image = getDefaultFallbackImage(card.name, card.company, card.dept);
-      }
-      return cleanCard;
-    });
-
-    const response = await fetch(url, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(syncPayload)
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Sync Push Error: Status ${response.status}`);
-    }
-  } catch (err) {
-    console.error("Cloud database save failed:", err);
-    showToast("Failed to backup changes to cloud database.", "warning");
-  }
 }
 
 function renderDatabase() {
@@ -988,14 +814,7 @@ async function runTesseractOcr(base64Image) {
     updateOcrStatus("Structuring contact details...", 95);
     console.log("Raw OCR Text:", extractedText);
     
-    // Choose Structuring Method: Custom AI Studio or Regex fallback
-    const geminiKey = localStorage.getItem("bizcard_settings_gemini_key");
-    const extractCompany = localStorage.getItem("bizcard_settings_extract_company") === "true";
-    if (geminiKey && geminiKey.trim().length > 10) {
-      await extractDetailsWithGemini(extractedText, base64Image, geminiKey.trim(), extractCompany);
-    } else {
-      extractDetailsWithRegex(extractedText);
-    }
+    extractDetailsWithRegex(extractedText);
     
   } catch (err) {
     console.error("Tesseract scan failed:", err);
@@ -1194,145 +1013,9 @@ function extractDetailsWithRegex(text) {
   }
 }
 
-// --- Gemini 1.5 Flash vision extraction logic ---
-async function extractDetailsWithGemini(ocrText, base64Image, apiKey, extractCompany = false) {
-  try {
-    updateOcrStatus("Refining details with Gemini AI...", 98);
-    
-    const rawBase64 = base64Image.split(",")[1];
-    
-    // Construct the Gemini request payload
-    const promptText = `
-      You are a professional assistant specialized in digitization. Analyze this business card image and transcription.
-      Extract contact details into a clean JSON structure.
-      
-      JSON schema to return:
-      {
-        "name": "Full Name",
-        "company": "Company / Organization Name",
-        "dept": "Department or Division (e.g. Sales, Marketing, IT, Finance, Engineering)",
-        "email": "Email Address",
-        "mobile": "Mobile/Cell Phone Number (standardized format)",
-        "work": "Work/Office Phone Number (standardized format)",
-        "website": "Website URL (excluding LinkedIn links)",
-        "linkedin": "LinkedIn Profile URL (e.g., https://www.linkedin.com/in/username)",
-        "address": "Full Physical Address",
-        "notes": "Any other key details like taglines, logo descriptions or other text"
-      }
-      
-      CRITICAL: Return ONLY raw, valid JSON. Do not include markdown code block formatting (like \`\`\`json). Just the json string.
-      If a field is not present on the card, set it to an empty string "".
-      
-      Extracted OCR reference text:
-      """
-      ${ocrText}
-      """
-    `;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-    
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: promptText },
-              {
-                inlineData: {
-                  mimeType: "image/jpeg",
-                  data: rawBase64
-                }
-              }
-            ]
-          }
-        ],
-        generationConfig: {
-          responseMimeType: "application/json"
-        }
-      })
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Gemini API Error: Status ${response.status}`);
-    }
-    
-    const resData = await response.json();
-    let responseText = resData.candidates[0].content.parts[0].text;
-    
-    // Clean JSON response
-    responseText = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
-    
-    const details = JSON.parse(responseText);
 
-    // Optionally clear company field if extraction disabled
-    if (!extractCompany) {
-      details.company = "";
-    }
-    
-    // Set details to form fields
-    document.getElementById("field-name").value = details.name || "";
-    document.getElementById("field-company").value = details.company || "";
-    document.getElementById("field-dept").value = details.dept || "";
-    document.getElementById("field-email").value = details.email || "";
-    document.getElementById("field-mobile").value = details.mobile || "";
-    document.getElementById("field-work").value = details.work || "";
-    document.getElementById("field-website").value = details.website || "";
-    document.getElementById("field-linkedin").value = details.linkedin || "";
-    document.getElementById("field-address").value = details.address || "";
-    
-    const finalNotes = details.notes ? `${details.notes}\n\n` : "";
-    document.getElementById("field-notes").value = `${finalNotes}=== Raw Scanned OCR Text ===\n${ocrText}`;
-    document.getElementById("field-image-data").value = base64Image;
-    
-    // Show image reference preview
-    const formPreviewImg = document.getElementById("form-card-preview-img");
-    const formPreviewContainer = document.getElementById("form-card-preview-container");
-    if (formPreviewImg && formPreviewContainer) {
-      formPreviewImg.src = base64Image;
-      formPreviewContainer.classList.remove("hidden");
-    }
-    
-    document.getElementById("ocr-overlay").classList.add("hidden");
-    showToast("Gemini AI successfully extracted details!", "success");
-    
-    if (isWebcamCapture) {
-      saveCardData();
-    }
-  } catch (err) {
-    console.error("Gemini Extraction Error:", err);
-    showToast("Gemini AI failed, using default regex parsing instead...", "warning");
-    extractDetailsWithRegex(ocrText);
-  }
-}
 
-// --- Imgbb Image Host Upload ---
-async function uploadToImgbb(base64Image, apiKey) {
-  try {
-    const rawBase64 = base64Image.split(",")[1];
-    
-    const formData = new FormData();
-    formData.append("image", rawBase64);
-    
-    const response = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
-      method: "POST",
-      body: formData
-    });
-    
-    if (!response.ok) {
-      throw new Error("Imgbb upload endpoint rejected image");
-    }
-    
-    const res = await response.json();
-    return res.data.url; // Returns direct JPG url
-  } catch (e) {
-    console.error("Imgbb upload failed:", e);
-    throw new Error("Image upload to Imgbb failed. Please check API Key.");
-  }
-}
 
 // --- Excel Creation & JSZip Compiler ---
 async function triggerExport() {
@@ -1343,15 +1026,8 @@ async function triggerExport() {
     return;
   }
   
-  const exportMode = document.querySelector('input[name="export-mode"]:checked').value;
-  
   showToast("Compiling export packages...", "info");
-  
-  if (exportMode === "zip") {
-    await exportAsLocalZip(selectedCards);
-  } else if (exportMode === "cloud") {
-    await exportAsCloudExcel(selectedCards);
-  }
+  await exportAsLocalZip(selectedCards);
 }
 
 // Method 1: Export offline ZIP containing images/ and excel sheet with relative links
@@ -1446,118 +1122,6 @@ Keep both extracted in the same folder directory together!`;
     
   } catch (err) {
     console.error("Local ZIP compilation failed:", err);
-    showToast("Export failed: " + err.message, "danger");
-  }
-}
-
-// Method 2: Upload images to Imgbb cloud and download standalone Excel sheet
-async function exportAsCloudExcel(cards) {
-  const imgbbKey = localStorage.getItem("bizcard_settings_imgbb_key");
-  
-  if (!imgbbKey || imgbbKey.trim().length === 0) {
-    showToast("Cloud Export requires an Imgbb API Key in settings.", "danger");
-    // Open settings drawer for key entry
-    settingsDrawer.classList.add("active");
-    return;
-  }
-  
-  // Prompt overlay for uploading steps
-  const overlay = document.createElement("div");
-  overlay.style.position = "fixed";
-  overlay.style.inset = "0";
-  overlay.style.backgroundColor = "rgba(10, 10, 15, 0.9)";
-  overlay.style.zIndex = "1000";
-  overlay.style.display = "flex";
-  overlay.style.flexDirection = "column";
-  overlay.style.alignItems = "center";
-  overlay.style.justifyContent = "center";
-  overlay.style.gap = "1.5rem";
-  overlay.innerHTML = `
-    <div class="loader-spinner"></div>
-    <div style="text-align: center;">
-      <h3 style="margin-bottom: 0.5rem;">Uploading photos to cloud storage...</h3>
-      <p id="cloud-upload-status" style="color: #94a3b8; font-size: 0.9rem;">Processing card 1 of ${cards.length}...</p>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-  
-  try {
-    const excelRows = [];
-    
-    for (let i = 0; i < cards.length; i++) {
-      const card = cards[i];
-      document.getElementById("cloud-upload-status").textContent = `Uploading photo of ${card.name} (card ${i + 1} of ${cards.length})...`;
-      
-      let imageUrlLink = "";
-      
-      if (card.image && card.image.startsWith("data:")) {
-        // Upload to imgbb
-        imageUrlLink = await uploadToImgbb(card.image, imgbbKey.trim());
-      } else {
-        // If image is already URL (e.g. from mock sandbox)
-        imageUrlLink = card.image;
-      }
-      
-      excelRows.push({
-        "Card ID": i + 1,
-        "Name": card.name,
-        "Company": card.company,
-        "Department": card.dept,
-        "Mobile Phone": card.mobile,
-        "Work Phone": card.work,
-        "Email": card.email,
-        "Website": card.website,
-        "LinkedIn": card.linkedin,
-        "Address": card.address,
-        "Photo Link": imageUrlLink,
-        "Notes": card.notes
-      });
-    }
-    
-    document.getElementById("cloud-upload-status").textContent = "Creating Excel Workbook...";
-    
-    const worksheet = XLSX.utils.json_to_sheet(excelRows);
-    
-    // Inject hyperlinks to public URLs (Column K, Index 10)
-    for (let i = 0; i < excelRows.length; i++) {
-      const rowIndex = i + 2;
-      const cellAddress = `K${rowIndex}`;
-      const publicLink = excelRows[i]["Photo Link"];
-      
-      if (publicLink) {
-        worksheet[cellAddress] = {
-          t: 's',
-          v: 'View Public Image',
-          l: { 
-            Target: publicLink, 
-            Tooltip: 'Click to view card photo online' 
-          }
-        };
-      }
-    }
-    
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Business Cards");
-    
-    // Write spreadsheet
-    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-    const excelBlob = new Blob([excelBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    
-    const downloadLink = document.createElement("a");
-    downloadLink.href = URL.createObjectURL(excelBlob);
-    downloadLink.download = `BizCards_Export_${Date.now()}.xlsx`;
-    document.body.appendChild(downloadLink);
-    downloadLink.click();
-    document.body.removeChild(downloadLink);
-    
-    document.body.removeChild(overlay);
-    showToast("Excel spreadsheet generated successfully!", "success");
-    
-  } catch (err) {
-    console.error("Cloud Export Error:", err);
-    if (document.body.contains(overlay)) {
-      document.body.removeChild(overlay);
-    }
     showToast("Export failed: " + err.message, "danger");
   }
 }
