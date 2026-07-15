@@ -182,7 +182,14 @@ async function syncWithCloudDatabase() {
     // Merge local and remote cards by ID
     const mergedMap = new Map();
     cardsDB.forEach(c => mergedMap.set(c.id, c));
-    remoteCards.forEach(c => mergedMap.set(c.id, c));
+    
+    remoteCards.forEach(c => {
+      const localCard = mergedMap.get(c.id);
+      if (localCard && localCard.image && localCard.image.startsWith("data:image/") && localCard.image.length > 5000) {
+        c.image = localCard.image;
+      }
+      mergedMap.set(c.id, c);
+    });
     
     cardsDB = Array.from(mergedMap.values());
     localStorage.setItem("bizcards_db", JSON.stringify(cardsDB));
@@ -202,12 +209,21 @@ async function pushDatabaseToCloud() {
   const url = getCloudSyncUrl();
   
   try {
+    // Strip large base64 images from the sync payload to prevent exceeding kvdb.io's 64KB limit
+    const syncPayload = cardsDB.map(card => {
+      const cleanCard = { ...card };
+      if (cleanCard.image && cleanCard.image.startsWith("data:image/") && cleanCard.image.length > 5000) {
+        cleanCard.image = getDefaultFallbackImage(card.name, card.company, card.dept);
+      }
+      return cleanCard;
+    });
+
     const response = await fetch(url, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(cardsDB)
+      body: JSON.stringify(syncPayload)
     });
     
     if (!response.ok) {
