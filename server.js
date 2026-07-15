@@ -21,25 +21,39 @@ function readDB() {
   }
 }
 
-// Initial Sync from Cloud on start
-async function initCloudSync() {
+// Pull and Merge from Cloud Database
+async function pullFromCloud() {
   try {
-    console.log("Pulling database from global cloud storage...");
     const response = await fetch(CLOUD_SYNC_URL);
     if (response.ok) {
-      const cards = await response.json();
-      if (Array.isArray(cards)) {
-        fs.writeFileSync(DB_PATH, JSON.stringify(cards, null, 2));
-        console.log(`Successfully synced ${cards.length} cards from cloud.`);
+      const cloudCards = await response.json();
+      if (Array.isArray(cloudCards)) {
+        const localCards = readDB();
+        const mergedMap = new Map();
+        
+        // Add local cards first
+        localCards.forEach(c => mergedMap.set(c.id, c));
+        // Add/overwrite with cloud cards
+        cloudCards.forEach(c => {
+          // Preserve local high-res image if available
+          const localCard = mergedMap.get(c.id);
+          if (localCard && localCard.image && localCard.image.startsWith("data:image/") && localCard.image.length > 5000) {
+            c.image = localCard.image;
+          }
+          mergedMap.set(c.id, c);
+        });
+        
+        const finalCards = Array.from(mergedMap.values());
+        fs.writeFileSync(DB_PATH, JSON.stringify(finalCards, null, 2));
       }
-    } else {
-      console.warn(`Cloud sync returned status ${response.status}`);
     }
   } catch (e) {
-    console.error("Initial cloud sync failed:", e.message);
+    console.error("Cloud pull failed:", e.message);
   }
 }
-initCloudSync();
+
+// Initial Sync from Cloud on start
+pullFromCloud();
 
 // Helper to write DB safely and push to cloud
 async function writeDB(data) {
@@ -82,7 +96,8 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static(path.join(__dirname)));
 
 // API Endpoints
-app.get('/api/cards', (req, res) => {
+app.get('/api/cards', async (req, res) => {
+  await pullFromCloud();
   const cards = readDB();
   res.json(cards);
 });
