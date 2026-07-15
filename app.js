@@ -218,7 +218,7 @@ function updateSelectedBadge() {
 }
 
 // Sandbox demo items
-function loadMockDemoData() {
+async function loadMockDemoData() {
   const mockCards = [
     {
       id: "mock-1",
@@ -255,16 +255,17 @@ function loadMockDemoData() {
   cardsDB = [...cardsDB, ...mockCards];
   
   // Save all mock cards to server in background
-  mockCards.forEach(card => {
+  const savePromises = mockCards.map(card => 
     fetch("/api/cards", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(card)
-    }).catch(e => console.error("Failed to post mock card:", e));
-  });
+    }).catch(e => console.error("Failed to post mock card:", e))
+  );
+  await Promise.all(savePromises);
 
   saveDatabaseToStorage();
-  closeSettingsDrawer();
+  await loadDatabaseFromServer();
   showToast("Sample cards loaded into database", "success");
 }
 
@@ -277,6 +278,7 @@ async function clearAllCards() {
     
     cardsDB = [];
     saveDatabaseToStorage();
+    await loadDatabaseFromServer();
     showToast("Database cleared", "info");
   }
 }
@@ -293,6 +295,7 @@ async function deleteCard(id) {
   } catch (err) {
     console.error("Failed to delete card from server:", err);
   }
+  await loadDatabaseFromServer();
 }
 
 // Edit card trigger
@@ -410,6 +413,7 @@ async function saveCardData(event) {
   }
   
   saveDatabaseToStorage();
+  await loadDatabaseFromServer();
   clearForm();
   
   // Switch scanner preview back to normal state
@@ -1006,11 +1010,7 @@ function extractDetailsWithRegex(text) {
   
   // Hide loader
   document.getElementById("ocr-overlay").classList.add("hidden");
-  showToast("OCR complete! Set Gemini API Key in Settings for best results.", "success");
-  
-  if (isWebcamCapture) {
-    saveCardData();
-  }
+  showToast("OCR complete! Please verify extracted details.", "success");
 }
 
 
